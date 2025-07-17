@@ -16,7 +16,6 @@ from sklearn.linear_model import LinearRegression
 app = Flask(__name__)
 CORS(app)
 
-# Variables globales pour le modèle et les données
 model = None
 scaler = None
 feature_cols = None
@@ -95,7 +94,6 @@ fight_counts = (
 
 valid_names = set(fight_counts[fight_counts >= MIN_FIGHTS].index)
 
-# ── on conserve seulement les lignes 100 % « valides » ────────────
 full_df = full_df[
     full_df["r_fighter"].isin(valid_names) &
     full_df["b_fighter"].isin(valid_names)
@@ -128,26 +126,24 @@ def load_and_preprocess_data() -> pd.DataFrame:
     """Charge et prétraite le dataset UFC (logique Streamlit)"""
     print("📦 Chargement et préparation du dataset…")
 
-    # 1) Chemin vers le CSV
     DATASET = os.getenv("DATASET_PATH", "datas/Large set/large_dataset.csv")
     fights_df = pd.read_csv(DATASET)
 
     mask = fights_df["r_reach"].notna() & fights_df["r_height"].notna()
-    if mask.sum() >= 50:                                # suffisamment de points
+    if mask.sum() >= 50:                                
         reg = LinearRegression().fit(
             fights_df.loc[mask, ["r_height"]], fights_df.loc[mask, "r_reach"]
         )
         a, b = reg.coef_[0], reg.intercept_
         print(f"📏 Reach ≈ {a:.3f} * height + {b:.1f}  (R²={reg.score(fights_df.loc[mask,['r_height']], fights_df.loc[mask,'r_reach']):.2f})")
     else:
-        a, b = 1.02, 0.0                                # fallback constant
+        a, b = 1.02, 0.0                                
 
     for side in ["r", "b"]:
         h, r = f"{side}_height", f"{side}_reach"
         miss = fights_df[r].isna() & fights_df[h].notna()
         fights_df.loc[miss, r] = fights_df.loc[miss, h] * a + b
 
-    # 2) Remplir les NaN numériques
     fights_df.fillna({
         "reach_diff":  fights_df["reach_diff"].mean(),
         "age_diff":    fights_df["age_diff"].mean(),
@@ -159,21 +155,17 @@ def load_and_preprocess_data() -> pd.DataFrame:
         "b_reach":fights_df["b_reach"].mean()
     }, inplace=True)
 
-    # 3) Remplir les NaN catégorielles
     fights_df["r_stance"].fillna("Unknown", inplace=True)
     fights_df["b_stance"].fillna("Unknown", inplace=True)
 
-    # 4) Encoder le vainqueur
     fights_df["winner_encoded"] = fights_df["winner"].map({"Red": 1, "Blue": 0})
 
-    # 5) Colonnes inutiles (exactement comme dans Streamlit)
     drop_cols = [
         "winner", "r_fighter", "b_fighter", "event_name", "referee",
         "method", "time_sec", "finish_round", "total_rounds", "is_title_bout"
     ]
     fights_df.drop(columns=drop_cols, inplace=True, errors="ignore")
 
-    # 6) Colonnes « in-fight » + tous les *_diff déjà calculés
     drop_in_fight = [
         col for col in fights_df.columns
         if col in [
@@ -187,7 +179,6 @@ def load_and_preprocess_data() -> pd.DataFrame:
     ]
     fights_df.drop(columns=drop_in_fight, inplace=True, errors="ignore")
 
-    # 7) Encodage des variables catégorielles
     label_cols = ["weight_class", "gender"]
     for col in label_cols:
         le = LabelEncoder()
@@ -197,7 +188,6 @@ def load_and_preprocess_data() -> pd.DataFrame:
     fights_df["r_stance"] = stance_le.fit_transform(fights_df["r_stance"])
     fights_df["b_stance"] = stance_le.fit_transform(fights_df["b_stance"])
 
-    # 8) Retourne le DataFrame prêt pour le modèle
     print(f"[INFO] Dataset prêt : {len(fights_df)} lignes – {fights_df.shape[1]} features")
     return fights_df
 
@@ -220,7 +210,6 @@ def train_model_func():
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    # Architecture du modèle
     inputs = Input(shape=(X_train_scaled.shape[1],))
     x = Dense(128, activation='relu')(inputs)
     x = Dropout(0.3)(x)
@@ -233,7 +222,6 @@ def train_model_func():
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     
-    # Poids des classes pour gérer le déséquilibre
     weights = class_weight.compute_class_weight(
         class_weight='balanced', classes=np.unique(y_train), y=y_train
     )
@@ -268,7 +256,7 @@ def any_corner_stats(fighter: str) -> pd.Series:
 
 def weighted_merge(mean_a, n_a, mean_b, n_b):
     if n_a + n_b == 0:
-        return pd.Series(dtype=float)   # vide
+        return pd.Series(dtype=float)   
     return (mean_a * n_a + mean_b * n_b) / (n_a + n_b)
 
 def build_fight_features(red_fighter: str, blue_fighter: str) -> pd.DataFrame:
@@ -277,7 +265,6 @@ def build_fight_features(red_fighter: str, blue_fighter: str) -> pd.DataFrame:
     Si un combattant est totalement absent d’un coin,
     on bascule sur any_corner_stats(…).
     """
-    # — stats “classiques” coin-spécifiques ————————————————
     def stats_for(fighter, corner):
         mask = full_df[f"{corner}_fighter"] == fighter
         return full_df.loc[mask].select_dtypes("number").mean()
@@ -286,23 +273,20 @@ def build_fight_features(red_fighter: str, blue_fighter: str) -> pd.DataFrame:
     red_stats_b  = stats_for(red_fighter,  "b")
     blue_stats_r = stats_for(blue_fighter, "r")
     blue_stats_b = stats_for(blue_fighter, "b")
-    print(f"🔴 Stats A (rouge) : {red_stats_r.to_dict()}")
+    print(f"Stats A (rouge) : {red_stats_r.to_dict()}")
     
-    # — fusion : on additionne quand présent, sinon on fallback ————
     # red_stats  = red_stats_r.add(red_stats_b, fill_value=0)
     # blue_stats = blue_stats_r.add(blue_stats_b, fill_value=0)
 
-# ─ fusion : si 2 valeurs ⇒ moyenne, sinon garde la valeur présente ─
     red_stats  = red_stats_r.where(red_stats_b.isna(), (red_stats_r + red_stats_b) / 2)
     blue_stats = blue_stats_r.where(blue_stats_b.isna(), (blue_stats_r + blue_stats_b) / 2)
 
 
-    if red_stats.isna().all():          # totally unseen ⇒ fallback
+    if red_stats.isna().all():          
         red_stats = any_corner_stats(red_fighter)
     if blue_stats.isna().all():
         blue_stats = any_corner_stats(blue_fighter)
 
-    # — construction du vecteur final ————————————————
     feats = {}
     for col in feature_cols:
         if col.startswith("r_"):
@@ -312,7 +296,6 @@ def build_fight_features(red_fighter: str, blue_fighter: str) -> pd.DataFrame:
         else:
             feats[col] = (red_stats.get(col, 0) + blue_stats.get(col, 0)) / 2
 
-    # differences éventuelles
     if "age_diff" in feature_cols:
         feats["age_diff"] = red_stats.get("r_age", 0) - blue_stats.get("b_age", 0)
 
@@ -349,15 +332,15 @@ def predict_endpoint():
 
         # --- passe 1 : A rouge ---
         f1 = build_fight_features(red, blue)
-        print(f"🔴 Stats A (rouge) : {f1.to_dict(orient='records')[0]}")
+        print(f"Stats A (rouge) : {f1.to_dict(orient='records')[0]}")
         f1_scaled = scaler.transform(f1.fillna(0))
         p1 = float(model.predict(f1_scaled, verbose=0)[0][0])  # proba rouge
-        print(f"🔴 Proba A (rouge) : {p1:.2%} pour {red}")
+        print(f"Proba A (rouge) : {p1:.2%} pour {red}")
         # --- passe 2 : B rouge ---
         f2 = build_fight_features(blue, red)
         f2_scaled = scaler.transform(f2.fillna(0))
         p2 = float(model.predict(f2_scaled, verbose=0)[0][0])  # proba rouge (de B)
-        print(f"🔵 Proba B (rouge) : {p2:.2%} pour {blue}")
+        print(f"Proba B (rouge) : {p2:.2%} pour {blue}")
         # --- fusion symétrique ---
         p_red   = 0.5 * (p1 + (1 - p2))
         p_blue  = 1.0 - p_red

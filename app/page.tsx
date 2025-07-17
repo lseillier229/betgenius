@@ -2,16 +2,15 @@
 
 import { useEffect, useState } from "react"
 import Image from "next/image"
-
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 
-import { Loader2, Trophy, Users, Target } from "lucide-react"
+import { Loader2, Trophy, Users, Target, ArrowRight } from "lucide-react"
 
-/* ───────── types ───────── */
 interface Fighter {
   name: string
   has_img: boolean
@@ -27,12 +26,10 @@ interface PredictionResult {
   confidence: number
 }
 
-/* ───────── config ───────── */
 const API      = "http://localhost:8000"          // backend Flask
 const FALLBACK = "/images/default-img.png"            // image statique dans /public
 
 export default function Home() {
-  /* ───────── états ───────── */
   const [fighters,      setFighters]      = useState<Fighter[]>([])
   const [redFighter,    setRedFighter]    = useState("")
   const [blueFighter,   setBlueFighter]   = useState("")
@@ -41,7 +38,6 @@ export default function Home() {
   const [loading,       setLoading]       = useState(false)
   const [prediction,    setPrediction]    = useState<PredictionResult | null>(null)
 
-  /* ───────── chargement des combattants ───────── */
   useEffect(() => {
     fetch(`${API}/fighters`)
       .then(r => r.json())
@@ -49,7 +45,6 @@ export default function Home() {
       .catch(err => console.error("load fighters:", err))
   }, [])
 
-  /* ───────── entraînement ───────── */
   const trainModel = async () => {
     setTrainingModel(true)
     try {
@@ -63,7 +58,6 @@ export default function Home() {
     }
   }
 
-  /* ───────── prédiction ───────── */
   const makePrediction = async () => {
     if (!redFighter || !blueFighter) return
     setLoading(true)
@@ -82,19 +76,28 @@ export default function Home() {
     }
   }
 
-  /* ───────── rendu ───────── */
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-blue-50 p-4">
       <div className="max-w-4xl mx-auto space-y-6">
 
         {/* titre */}
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold flex items-center justify-center gap-2">
-            <Trophy className="h-8 w-8 text-yellow-500" /> BETGENIUS
-          </h1>
-          <p className="text-gray-600">Prédisez le vainqueur de vos combats UFC favoris</p>
+        <div className="flex justify-between items-center">
+          <div className="text-center flex-1">
+            <h1 className="text-4xl font-bold flex items-center justify-center gap-2">
+              <Trophy className="h-8 w-8 text-yellow-500" /> BETGENIUS UFC
+            </h1>
+            <p className="text-gray-600">Prédisez le vainqueur de vos combats UFC favoris</p>
+          </div>
+          
+          <Link href="/tennis">
+            <Button variant="outline" size="sm" className="bg-green-50 border-green-200 hover:bg-green-100">
+              🎾 Tennis
+              <ArrowRight className="h-4 w-4 ml-1" />
+            </Button>
+          </Link>
         </div>
-
+        
+        
         {/* bloc entraînement */}
         {!modelTrained && (
           <Card>
@@ -134,13 +137,12 @@ export default function Home() {
                   </SelectTrigger>
                   <SelectContent>
                     {fighters.map(f => {
-                      // ── choisis la bonne source ─────────────────
                       const src = f.has_img && f.img ? f.img : FALLBACK
                       return (
                         <SelectItem key={f.name} value={f.name}>
                           <div className="flex items-center gap-2">
                             <Image
-                              src={src}                     /* ← ici */
+                              src={src}                     
                               alt={f.name}
                               width={24}
                               height={24}
@@ -171,7 +173,7 @@ export default function Home() {
                         <SelectItem key={f.name} value={f.name}>
                           <div className="flex items-center gap-2">
                             <Image
-                              src={src}                     /* ← ici */
+                              src={src}                     
                               alt={f.name}
                               width={24}
                               height={24}

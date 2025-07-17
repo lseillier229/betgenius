@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script pour démarrer le serveur Python UFC Predictor
+Script pour démarrer le serveur Sports Predictor unifié (UFC + Tennis)
 """
 
 import subprocess
@@ -15,15 +15,17 @@ def install_requirements():
     ])
 
 def start_server():
-    """Démarre le serveur Flask"""
-    print("🚀 Démarrage du serveur UFC Predictor...")
-    os.system("python ufc_predictor.py")
+    """Démarre le serveur Flask unifié"""
+    print("Démarrage du serveur Sports Predictor...")
+    print("UFC Predictor disponible sur port 8000")
+    print("Tennis Predictor disponible sur port 8000/tennis")
+    os.system("python unified_sports_predictor.py")
 
 if __name__ == "__main__":
     try:
         install_requirements()
         start_server()
     except KeyboardInterrupt:
-        print("\n👋 Arrêt du serveur...")
+        print("\nArrêt du serveur...")
     except Exception as e:
-        print(f"❌ Erreur: {e}")
+        print(f"Erreur: {e}")
