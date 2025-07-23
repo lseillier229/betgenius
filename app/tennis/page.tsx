@@ -160,7 +160,7 @@ export default function TennisPage() {
         </div>
 
         {/* Entraînement du modèle */}
-        {!modelTrained && (
+        {/*!modelTrained && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -176,7 +176,7 @@ export default function TennisPage() {
               </Button>
             </CardContent>
           </Card>
-        )}
+        )*/}
 
         {/* Sélection des joueurs et paramètres */}
         <Card>
@@ -269,7 +269,7 @@ export default function TennisPage() {
 
             <Button
               onClick={makePrediction}
-              disabled={!player1 || !player2 || !modelTrained || loading}
+              disabled={!player1 || !player2  || loading}
               className="w-full"
             >
               {loading

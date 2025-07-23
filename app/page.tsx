@@ -99,7 +99,7 @@ export default function Home() {
         
         
         {/* bloc entraînement */}
-        {!modelTrained && (
+        {/*!modelTrained && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -115,7 +115,7 @@ export default function Home() {
               </Button>
             </CardContent>
           </Card>
-        )}
+        )*/}
 
         {/* sélection combattants */}
         <Card>
@@ -167,7 +167,6 @@ export default function Home() {
                   </SelectTrigger>
                   <SelectContent>
                     {fighters.map(f => {
-                      // ── choisis la bonne source ─────────────────
                       const src = f.has_img && f.img ? f.img : FALLBACK
                       return (
                         <SelectItem key={f.name} value={f.name}>
@@ -192,7 +191,7 @@ export default function Home() {
 
             <Button
               onClick={makePrediction}
-              disabled={!redFighter || !blueFighter || !modelTrained || loading}
+              disabled={!redFighter || !blueFighter || loading}
               className="w-full"
             >
               {loading

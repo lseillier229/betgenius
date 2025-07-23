@@ -68,9 +68,9 @@ try:
         ufc_full_df["r_fighter"].isin(valid_names) &
         ufc_full_df["b_fighter"].isin(valid_names)
     ].reset_index(drop=True)
-    print("✅ Données UFC chargées")
+    print("Données UFC chargées")
 except Exception as e:
-    print(f"⚠️ Erreur chargement UFC: {e}")
+    print(f"Erreur chargement UFC: {e}")
 
 # ========== FONCTIONS UFC ==========
 
@@ -90,7 +90,7 @@ def img_url(name: str) -> str:
     return f"{IMG_BASE}{key}"
 
 def load_and_preprocess_ufc_data() -> pd.DataFrame:
-    print("📦 Chargement et préparation du dataset UFC…")
+    print("Chargement et préparation du dataset UFC…")
     
     fights_df = pd.read_csv(UFC_DATASET)
     
@@ -301,7 +301,7 @@ def load_and_preprocess_tennis_data():
 def train_tennis_model():
     global tennis_model, tennis_scaler, tennis_feature_cols
     
-    print("🎾 Entraînement du modèle tennis...")
+    print("Entraînement du modèle tennis...")
     df = load_and_preprocess_tennis_data()
     
     features = [
@@ -397,7 +397,26 @@ def build_tennis_features(player1, player2, surface="Hard", tourney_level="A"):
             features[col] = 0
     
     return pd.DataFrame([features])[tennis_feature_cols]
-
+#========== INITIALISATION DES MODELES ==========
+def initialize_models():
+    """Entraîne les modèles au démarrage de l'API"""
+    print("Initialisation des modèles au démarrage...")
+    
+    try:
+        print("Entraînement du modèle UFC...")
+        train_ufc_model()
+        print("Modèle UFC prêt")
+    except Exception as e:
+        print(f"Erreur entraînement UFC: {e}")
+    
+    try:
+        print("Entraînement du modèle Tennis...")
+        train_tennis_model()
+        print("Modèle Tennis prêt")
+    except Exception as e:
+        print(f"Erreur entraînement Tennis: {e}")
+    
+    print("Initialisation terminée")
 # ========== ENDPOINTS UFC ==========
 
 @app.route('/train', methods=['POST'])
@@ -553,7 +572,7 @@ def get_tennis_players():
                     'avg_rank': round(stats['rank']) if stats else None
                 })
         
-        players_list.sort(key=lambda x: x['name'], reverse=True)
+        players_list.sort(key=lambda x: x['name'], reverse=False)
         
         return jsonify({
             'players': players_list[:500],
@@ -603,4 +622,5 @@ if __name__ == '__main__':
     print("Démarrage du serveur Sports Predictor unifié...")
     print("UFC disponible sur tous les endpoints existants")
     print("Tennis disponible sur /tennis/*")
+    initialize_models()
     app.run(host='0.0.0.0', port=8000, debug=True)
