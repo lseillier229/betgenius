@@ -526,15 +526,22 @@ def predict_tennis_endpoint():
         if not tennis_model:
             return jsonify({'error': 'Modèle tennis non entraîné'}), 400
         
-        features = build_tennis_features(player1, player2, surface, tourney_level)
-        features_scaled = tennis_scaler.transform(features)
-        
-        proba = tennis_model.predict_proba(features_scaled)[0]
-        p1_proba = float(proba[1])
-        p2_proba = float(proba[0])
-        
+        features1 = build_tennis_features(player1, player2, surface, tourney_level)
+        features_scaled1 = tennis_scaler.transform(features1)
+        proba1 = (tennis_model.predict_proba(features_scaled1)[0][0])
+
+        features2 = build_tennis_features(player2, player1, surface, tourney_level)
+        features_scaled2 = tennis_scaler.transform(features2)
+        proba2 = (tennis_model.predict_proba(features_scaled2)[0][0])
+
+        p1_proba = 0.5 * (proba1 + (1 - proba2))
+        p2_proba = 1.0 - p1_proba
+
         winner = player1 if p1_proba > 0.5 else player2
         confidence = max(p1_proba, p2_proba)
+        
+        
+        
         
         return jsonify({
             'player1': player1,
@@ -557,25 +564,23 @@ def get_tennis_players():
     try:
         if tennis_df is None:
             load_and_preprocess_tennis_data()
-        
+        print("Récupération des joueurs de tennis...")
         players = set()
         players.update(tennis_df['player_1'].dropna().unique())
         players.update(tennis_df['player_2'].dropna().unique())
-        
+        print(f"Joueurs de tennis récupérés : {len(players)}")
         players_list = []
         for player in sorted(players):
-            stats = get_player_stats(player)
-            if stats['matches_count'] > 150:
-                players_list.append({
-                    'name': player,
-                    'matches_count': stats['matches_count'] if stats else 0,
-                    'avg_rank': round(stats['rank']) if stats else None
-                })
-        
+            # stats = get_player_stats(player)
+            
+            players_list.append({
+                'name': player
+            })
+        print(f"Joueurs de tennis filtrés : {len(players_list)}")
         players_list.sort(key=lambda x: x['name'], reverse=False)
         
         return jsonify({
-            'players': players_list[:500],
+            'players': players_list,
             'total': len(players_list)
         })
         
@@ -586,7 +591,7 @@ def get_tennis_players():
 def get_tennis_surfaces():
     try:
         surfaces = ['Hard', 'Clay', 'Grass', 'Carpet']
-        levels = ['A', 'D', 'F', 'G', 'M']
+        levels = ['A', 'D', 'G', 'M']
         
         return jsonify({
             'surfaces': surfaces,
@@ -601,10 +606,14 @@ def get_tennis_surfaces():
 def health_check():
     return jsonify({
         'status': 'healthy',
-        'ufc_model_trained': ufc_model is not None,
+        'ufc_model_trained': ufc_model is not None
+    })
+@app.route('/tennis/health', methods=['GET'])
+def tennis_health_check():
+    return jsonify({
+        'status': 'healthy',
         'tennis_model_trained': tennis_model is not None
     })
-
 @app.route('/status', methods=['GET'])
 def status():
     return jsonify({
