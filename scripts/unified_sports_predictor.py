@@ -16,6 +16,15 @@ from sklearn.linear_model import LinearRegression
 from glob import glob
 import requests
 import zipfile
+import random
+from sklearn.experimental import enable_iterative_imputer  
+from sklearn.impute import IterativeImputer
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.pipeline import Pipeline
+
+import joblib
+np.random.default_rng()
 
 app = Flask(__name__)
 CORS(app)
@@ -206,42 +215,203 @@ def train_ufc_model():
     print(f"Modèle UFC entraîné - Accuracy validation : {val_accuracy:.2%}")
     return val_accuracy
 
+
+def train_ufc_imputer():
+    """
+    Entraîne l'imputer pour gérer les valeurs manquantes
+    """
+    global ufc_imputer, ufc_df_processed
+    
+    if ufc_df_processed is None:
+        print("Warning: ufc_df_processed is None, loading data...")
+        ufc_df_processed = load_and_preprocess_ufc_data()
+    
+    df = ufc_df_processed.copy()
+    
+    cat_cols = ["weight_class", "gender", "r_stance", "b_stance"]
+    num_cols = [c for c in df.columns if c not in cat_cols and c != "winner_encoded"]
+    
+    print(f"Training imputer on {len(num_cols)} numeric columns...")
+    
+    ufc_imputer = IterativeImputer(
+        random_state=0, 
+        initial_strategy="median", 
+        max_iter=10
+    )
+    
+    if len(num_cols) > 0 and len(df) > 0:
+        ufc_imputer.fit(df[num_cols])
+        
+        os.makedirs("datas", exist_ok=True)
+        joblib.dump(ufc_imputer, "datas/ufc_imputer.pkl")
+        print("UFC imputer trained and saved successfully")
+    else:
+        print("Warning: No numeric columns or data to train imputer")
+
+
 def any_corner_stats_ufc(fighter: str) -> pd.Series:
+    global ufc_imputer, ufc_feature_cols, ufc_df_processed
+    
+    if ufc_imputer is None:
+        if os.path.exists("datas/ufc_imputer.pkl"):
+            ufc_imputer = joblib.load("datas/ufc_imputer.pkl")
+        else:
+            print("Warning: UFC imputer not found, training it now...")
+            train_ufc_imputer()
+    
+    if ufc_feature_cols is None:
+        print("Warning: ufc_feature_cols not defined, training model...")
+        train_ufc_model()
+    
+    cat_cols = ["weight_class", "gender", "r_stance", "b_stance"]
+    num_cols = [c for c in ufc_feature_cols if c not in cat_cols]
+    
+    # ---------- 1. Gérer les combattants personnalisés ----------
+    init_custom_fighters_file()
+    custom_fighters = pd.read_csv(CUSTOM_FIGHTERS_FILE)
+    
+    if fighter in custom_fighters["name"].values:
+        print(f"Processing custom fighter: {fighter}")
+        fd = custom_fighters.loc[custom_fighters["name"] == fighter].iloc[0]
+        
+        stats = pd.Series(index=ufc_feature_cols, dtype=float)
+        
+        for col in ufc_feature_cols:
+            if col in ufc_df_processed.columns:
+                stats[col] = ufc_df_processed[col].mean()
+            else:
+                stats[col] = 0
+        
+        stats["r_age"] = fd["age"]
+        stats["b_age"] = fd["age"]
+        stats["r_height"] = fd["height"]
+        stats["b_height"] = fd["height"]
+        stats["r_weight"] = fd["weight"]
+        stats["b_weight"] = fd["weight"]
+        stats["r_reach"] = fd["reach"]
+        stats["b_reach"] = fd["reach"]
+        
+        if "weight_class" in stats.index:
+            wc_mask = ufc_full_df["weight_class"] == fd["weight_class"]
+            if wc_mask.any():
+                stats["weight_class"] = ufc_df_processed.loc[
+                    ufc_df_processed.index.isin(ufc_full_df[wc_mask].index), 
+                    "weight_class"
+                ].iloc[0] if len(ufc_df_processed) > 0 else 0
+            else:
+                stats["weight_class"] = 0
+        
+        if "gender" in stats.index:
+            g_mask = ufc_full_df["gender"] == fd["gender"]
+            if g_mask.any():
+                stats["gender"] = ufc_df_processed.loc[
+                    ufc_df_processed.index.isin(ufc_full_df[g_mask].index), 
+                    "gender"
+                ].iloc[0] if len(ufc_df_processed) > 0 else 0
+            else:
+                stats["gender"] = 0
+        
+        stance_mapping = {"Orthodox": 0, "Southpaw": 1, "Unknown": 2}
+        stance_val = stance_mapping.get(fd.get("stance", "Orthodox"), 0)
+        stats["r_stance"] = stance_val
+        stats["b_stance"] = stance_val
+        
+        wld_cols = ["r_wins", "b_wins", "r_losses", "b_losses", "r_draws", "b_draws"]
+        for col in wld_cols:
+            if col in stats.index:
+                stats[col] = np.nan
+        
+        if ufc_imputer is not None and len(num_cols) > 0:
+            stats_num_df = pd.DataFrame([stats[num_cols]])
+            
+            if stats_num_df.isna().any().any():
+                try:
+                    imputed_vals = ufc_imputer.transform(stats_num_df)[0]
+                    imputed_series = pd.Series(imputed_vals, index=num_cols)
+                    
+                    for col in num_cols:
+                        if pd.isna(stats[col]):
+                            stats[col] = imputed_series[col]
+                except Exception as e:
+                    print(f"Warning: Imputation failed for {fighter}: {e}")
+                    for col in num_cols:
+                        if pd.isna(stats[col]) and col in ufc_df_processed.columns:
+                            stats[col] = ufc_df_processed[col].mean()
+        
+        return stats.reindex(ufc_feature_cols).fillna(0)
+    
+    # ---------- 2. Combattant réel ----------
     mask = (ufc_full_df["r_fighter"] == fighter) | (ufc_full_df["b_fighter"] == fighter)
-    return ufc_full_df.loc[mask].select_dtypes("number").mean().fillna(0)
+    fighter_fights = ufc_full_df.loc[mask]
+    
+    if len(fighter_fights) == 0:
+        print(f"Warning: No fights found for {fighter}, using average stats")
+        return ufc_df_processed.mean().reindex(ufc_feature_cols).fillna(0)
+    
+    numeric_stats = fighter_fights.select_dtypes("number").mean()
+    
+    result = pd.Series(index=ufc_feature_cols, dtype=float)
+    for col in ufc_feature_cols:
+        if col in numeric_stats.index:
+            result[col] = numeric_stats[col]
+        elif col in ufc_df_processed.columns:
+            result[col] = ufc_df_processed[col].mean()
+        else:
+            result[col] = 0
+    
+    return result.fillna(0)
 
 def build_ufc_fight_features(red_fighter: str, blue_fighter: str) -> pd.DataFrame:
-    def stats_for(fighter, corner):
-        mask = ufc_full_df[f"{corner}_fighter"] == fighter
-        return ufc_full_df.loc[mask].select_dtypes("number").mean()
-    
-    red_stats_r = stats_for(red_fighter, "r")
-    red_stats_b = stats_for(red_fighter, "b")
-    blue_stats_r = stats_for(blue_fighter, "r")
-    blue_stats_b = stats_for(blue_fighter, "b")
-    
-    red_stats = red_stats_r.where(red_stats_b.isna(), (red_stats_r + red_stats_b) / 2)
-    blue_stats = blue_stats_r.where(blue_stats_b.isna(), (blue_stats_r + blue_stats_b) / 2)
-    
-    if red_stats.isna().all():
-        red_stats = any_corner_stats_ufc(red_fighter)
-    if blue_stats.isna().all():
-        blue_stats = any_corner_stats_ufc(blue_fighter)
+    red_stats = any_corner_stats_ufc(red_fighter)
+    blue_stats = any_corner_stats_ufc(blue_fighter)
     
     feats = {}
+    
     for col in ufc_feature_cols:
         if col.startswith("r_"):
-            feats[col] = red_stats.get(col, 0)
+            base_col = col[2:]  
+            if f"r_{base_col}" in red_stats.index:
+                feats[col] = red_stats[f"r_{base_col}"]
+            elif base_col in red_stats.index:
+                feats[col] = red_stats[base_col]
+            else:
+                feats[col] = 0
+                
         elif col.startswith("b_"):
-            feats[col] = blue_stats.get(col, 0)
+            base_col = col[2:]  
+            if f"b_{base_col}" in blue_stats.index:
+                feats[col] = blue_stats[f"b_{base_col}"]
+            elif base_col in blue_stats.index:
+                feats[col] = blue_stats[base_col]
+            else:
+                feats[col] = 0
+                
         else:
-            feats[col] = (red_stats.get(col, 0) + blue_stats.get(col, 0)) / 2
+            if col in red_stats.index and col in blue_stats.index:
+                if red_stats[col] == blue_stats[col]:
+                    feats[col] = red_stats[col]
+                else:
+                    feats[col] = red_stats[col]
+            elif col in red_stats.index:
+                feats[col] = red_stats[col]
+            elif col in blue_stats.index:
+                feats[col] = blue_stats[col]
+            else:
+                feats[col] = 0
     
     if "age_diff" in ufc_feature_cols:
-        feats["age_diff"] = red_stats.get("r_age", 0) - blue_stats.get("b_age", 0)
+        feats["age_diff"] = feats.get("r_age", 0) - feats.get("b_age", 0)
+    if "height_diff" in ufc_feature_cols:
+        feats["height_diff"] = feats.get("r_height", 0) - feats.get("b_height", 0)
+    if "reach_diff" in ufc_feature_cols:
+        feats["reach_diff"] = feats.get("r_reach", 0) - feats.get("b_reach", 0)
+    if "weight_diff" in ufc_feature_cols:
+        feats["weight_diff"] = feats.get("r_weight", 0) - feats.get("b_weight", 0)
     
-    return pd.DataFrame([feats]).reindex(columns=ufc_feature_cols, fill_value=0)
-
+    result_df = pd.DataFrame([feats]).reindex(columns=ufc_feature_cols, fill_value=0)
+    
+    print(f"Fight features built for {red_fighter} vs {blue_fighter}")
+    return result_df
 # ========== FONCTIONS TENNIS ==========
 
 
@@ -397,6 +567,127 @@ def build_tennis_features(player1, player2, surface="Hard", tourney_level="A"):
             features[col] = 0
     
     return pd.DataFrame([features])[tennis_feature_cols]
+
+# ========== GESTION DES COMBATTANTS PERSONNALISÉS ==========
+
+CUSTOM_FIGHTERS_FILE = "datas/custom_fighters.csv"
+
+def init_custom_fighters_file():
+    """Initialise le fichier CSV des combattants personnalisés s'il n'existe pas"""
+    if not os.path.exists(CUSTOM_FIGHTERS_FILE):
+        columns = [
+            'name', 'age', 'height', 'weight', 'reach', 'stance', 
+            'weight_class', 'gender', 'is_custom', 'created_at'
+        ]
+        pd.DataFrame(columns=columns).to_csv(CUSTOM_FIGHTERS_FILE, index=False)
+        print(f"Fichier {CUSTOM_FIGHTERS_FILE} créé")
+
+def calculate_reach_from_height(height):
+    a, b = 1.02, 0.0  
+    
+    mask = ufc_full_df["r_reach"].notna() & ufc_full_df["r_height"].notna()
+    if mask.sum() >= 50:
+        from sklearn.linear_model import LinearRegression
+        reg = LinearRegression().fit(
+            ufc_full_df.loc[mask, ["r_height"]], 
+            ufc_full_df.loc[mask, "r_reach"]
+        )
+        a, b = reg.coef_[0], reg.intercept_
+    
+    return height * a + b
+
+@app.route('/custom-fighter', methods=['POST'])
+def add_custom_fighter():
+    """Ajoute un combattant personnalisé"""
+    try:
+        init_custom_fighters_file()
+        
+        data = request.json
+        
+        required_fields = ['name', 'age', 'height', 'weight', 'weight_class', 'gender']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Le champ {field} est obligatoire'}), 400
+        
+        if 'reach' not in data or data['reach'] is None:
+            data['reach'] = calculate_reach_from_height(float(data['height']))
+        
+        if 'stance' not in data or data['stance'] is None:
+            data['stance'] = 'Orthodox'
+        
+        custom_fighters = pd.read_csv(CUSTOM_FIGHTERS_FILE)
+        if data['name'] in custom_fighters['name'].values:
+            return jsonify({'error': 'Un combattant avec ce nom existe déjà'}), 400
+        
+        data['is_custom'] = True
+        data['created_at'] = pd.Timestamp.now().isoformat()
+        cols = [
+            "name", "age", "height", "weight", "reach", "stance",
+            "weight_class", "gender", "is_custom", "created_at"
+        ]
+        new_fighter = pd.DataFrame([data])[cols]
+        new_fighter.to_csv(CUSTOM_FIGHTERS_FILE, mode='a', header=False, index=False)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Combattant ajouté avec succès',
+            'fighter': data
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/custom-fighters', methods=['GET'])
+def get_custom_fighters():
+    """Récupère la liste des combattants personnalisés"""
+    try:
+        init_custom_fighters_file()
+        custom_fighters = pd.read_csv(CUSTOM_FIGHTERS_FILE)
+        
+        fighters_list = []
+        for _, fighter in custom_fighters.iterrows():
+            fighters_list.append({
+                'name': fighter['name'],
+                'age': fighter['age'],
+                'height': fighter['height'],
+                'weight': fighter['weight'],
+                'reach': fighter['reach'],
+                'stance': fighter['stance'],
+                'weight_class': fighter['weight_class'],
+                'gender': fighter['gender'],
+                'is_custom': True,
+                'created_at': fighter['created_at']
+            })
+        
+        return jsonify({
+            'fighters': fighters_list,
+            'total': len(fighters_list)
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/custom-fighter/<name>', methods=['DELETE'])
+def delete_custom_fighter(name):
+    """Supprime un combattant personnalisé"""
+    try:
+        init_custom_fighters_file()
+        custom_fighters = pd.read_csv(CUSTOM_FIGHTERS_FILE)
+        
+        if name not in custom_fighters['name'].values:
+            return jsonify({'error': 'Combattant non trouvé'}), 404
+        
+        custom_fighters = custom_fighters[custom_fighters['name'] != name]
+        custom_fighters.to_csv(CUSTOM_FIGHTERS_FILE, index=False)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Combattant {name} supprimé avec succès'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 #========== INITIALISATION DES MODELES ==========
 def initialize_models():
     """Entraîne les modèles au démarrage de l'API"""
@@ -416,6 +707,12 @@ def initialize_models():
     except Exception as e:
         print(f"Erreur entraînement Tennis: {e}")
     
+    try:
+        print("Entraînement de l'imputer ufc...")
+        train_ufc_imputer()
+        print("Imputer UFC prêt")
+    except Exception as e:
+        print(f"Erreur entraînement Imputer UFC: {e}")
     print("Initialisation terminée")
 # ========== ENDPOINTS UFC ==========
 
@@ -478,6 +775,7 @@ def get_ufc_fighters():
     
     gender = request.args.get("gender")
     weight_class = request.args.get("weight_class")
+    include_custom = request.args.get("include_custom", "true").lower() == "true"
     
     df = ufc_full_df
     if gender:
@@ -493,11 +791,34 @@ def get_ufc_fighters():
         fighters.append({
             "name": n,
             "has_img": has_img,
-            "img": f"{IMG_BASE}{IMG_PREFIX}{slug(n)}.png" if has_img else None
+            "img": f"{IMG_BASE}{IMG_PREFIX}{slug(n)}.png" if has_img else None,
+            "is_custom": False
         })
     
+    if include_custom:
+        try:
+            init_custom_fighters_file()
+            custom_fighters = pd.read_csv(CUSTOM_FIGHTERS_FILE)
+            
+            if gender:
+                custom_fighters = custom_fighters[custom_fighters['gender'] == gender]
+            if weight_class:
+                custom_fighters = custom_fighters[custom_fighters['weight_class'] == weight_class]
+            
+            for _, fighter in custom_fighters.iterrows():
+                fighters.append({
+                    "name": fighter['name'],
+                    "has_img": False,
+                    "img": None,
+                    "is_custom": True,
+                    "created_at": fighter.get('created_at', None)
+                })
+        except Exception as e:
+            print(f"Erreur lors du chargement des combattants personnalisés: {e}")
+    
+    fighters.sort(key=lambda x: x['name'])
+    
     return jsonify({"fighters": fighters})
-
 # ========== ENDPOINTS TENNIS ==========
 
 @app.route('/tennis/train', methods=['POST'])

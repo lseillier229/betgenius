@@ -88,7 +88,15 @@ export default function Home() {
             </h1>
             <p className="text-gray-600">Prédisez le vainqueur de vos combats UFC favoris</p>
           </div>
-          
+
+          <div className="flex gap-2">
+            <Link href="/custom-fighter">
+              <Button variant="outline" size="sm" className="bg-red-50 border-red-200 hover:bg-red-100">
+                <Users className="h-4 w-4 mr-1" />
+                Mon Profil
+              </Button>
+            </Link>
+
           <Link href="/tennis">
             <Button variant="outline" size="sm" className="bg-green-50 border-green-200 hover:bg-green-100">
               🎾 Tennis
@@ -96,7 +104,7 @@ export default function Home() {
             </Button>
           </Link>
         </div>
-        
+      </div>  
         
         {/* bloc entraînement */}
         {/*!modelTrained && (
